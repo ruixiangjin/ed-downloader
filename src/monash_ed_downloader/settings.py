@@ -30,5 +30,9 @@ class Settings:
         return self.state_root / "ed-storage-state.json"
 
     @property
+    def login_marker(self) -> Path:
+        return self.state_root / "login-confirmed.json"
+
+    @property
     def database(self) -> Path:
         return self.state_root / "state.sqlite3"

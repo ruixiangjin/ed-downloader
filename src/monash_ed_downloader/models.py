@@ -78,8 +78,7 @@ def sanitise_url(value: str) -> str:
     query = [
         (key, item)
         for key, item in parse_qsl(parsed.query, keep_blank_values=True)
-        if key.casefold() not in SENSITIVE_QUERY_KEYS
-        and not key.casefold().startswith("x-amz-")
+        if key.casefold() not in SENSITIVE_QUERY_KEYS and not key.casefold().startswith("x-amz-")
     ]
     return urlunparse(parsed._replace(query=urlencode(query)))
 

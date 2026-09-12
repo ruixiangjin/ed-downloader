@@ -5,6 +5,7 @@ from collections.abc import Iterable
 
 from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Page
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from monash_ed_downloader.errors import CourseNotFoundError, LoginRequiredError
 from monash_ed_downloader.models import Course, CourseStatus
@@ -48,7 +49,8 @@ def parse_dashboard_html(html: str, *, base_url: str, region: str) -> list[Cours
     found_boundary = False
     for child in root.find_all(recursive=False):
         text = child.get_text(" ", strip=True)
-        classes = set(child.get("class", []))
+        raw_classes = child.get("class")
+        classes = set(str(item) for item in raw_classes) if isinstance(raw_classes, list) else set()
         if "dash-header" in classes and text.casefold() == "archived":
             archived = True
             found_boundary = True
@@ -85,8 +87,12 @@ class CourseCatalog:
             f"{self.base_url}/{self.region}/dashboard",
             wait_until="domcontentloaded",
         )
-        if not await self.page.locator('[data-testid="appbar-user"]').is_visible():
-            raise LoginRequiredError("Ed login is required. Run `ed-downloader login`.")
+        try:
+            await self.page.locator('[data-testid="appbar-user"]').wait_for(
+                state="visible", timeout=5_000
+            )
+        except PlaywrightTimeoutError:
+            raise LoginRequiredError("Ed login is required. Run `ed-downloader login`.") from None
         return parse_dashboard_html(
             await self.page.content(), base_url=self.base_url, region=self.region
         )

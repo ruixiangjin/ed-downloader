@@ -4,7 +4,7 @@ import re
 
 
 def parse_group_selection(value: str, available: list[int]) -> list[int]:
-    normalised = value.translate(str.maketrans({"，": ",", "～": "-", "~": "-"})).strip()
+    normalised = value.translate(str.maketrans("，～~", ",--")).strip()
     if not normalised:
         raise ValueError("Enter at least one group number.")
     selected: set[int] = set()

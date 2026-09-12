@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from playwright.async_api import Locator, Page
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from monash_ed_downloader.errors import LoginRequiredError, SyncSafetyError
 from monash_ed_downloader.models import Course, sanitise_data
@@ -270,7 +271,13 @@ async def _course_info(page: Page, course: Course) -> dict[str, Any]:
 
 async def _discover_full(page: Page, course_id: str, progress: Callable[[int], None]) -> list[str]:
     selector = f'section[aria-label="Thread list"] a[href*="/courses/{course_id}/discussion/"]'
-    await page.locator(selector).first.wait_for(state="visible", timeout=15_000)
+    try:
+        await page.locator(selector).first.wait_for(state="visible", timeout=15_000)
+    except PlaywrightTimeoutError:
+        # An authenticated course may legitimately have no discussion threads.
+        if await page.locator('section[aria-label="Thread list"]').is_visible():
+            return []
+        raise
     if await _click_if_visible(
         page.get_by_role("button", name=re.compile(r"^Show \d+ more", re.I))
     ):

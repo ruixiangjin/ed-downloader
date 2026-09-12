@@ -2,7 +2,9 @@ from monash_ed_downloader.models import Course, CourseStatus, sanitise_url
 
 
 def test_course_code_is_discovered_from_title() -> None:
-    course = Course("39026", "FIT2109 S2 2026 Malaysia", "https://example.test", CourseStatus.CURRENT)
+    course = Course(
+        "39026", "FIT2109 S2 2026 Malaysia", "https://example.test", CourseStatus.CURRENT
+    )
     assert course.code == "FIT2109"
 
 

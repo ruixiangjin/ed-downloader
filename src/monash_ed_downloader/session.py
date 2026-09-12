@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from playwright.async_api import BrowserContext, Page, Playwright, Route, async_playwright
 from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from monash_ed_downloader.errors import BrowserUnavailableError, LoginRequiredError
 from monash_ed_downloader.settings import Settings
@@ -125,12 +126,26 @@ class BrowserSession:
             ) from error
 
     async def is_logged_in(self) -> bool:
-        return await self.page.locator('[data-testid="appbar-user"]').is_visible()
+        try:
+            return await self.page.locator('[data-testid="appbar-user"]').is_visible()
+        except PlaywrightError:
+            return False
+
+    async def wait_for_logged_in(self, *, timeout_ms: int = 4_000) -> bool:
+        if await self.is_logged_in():
+            return True
+        try:
+            await self.page.locator('[data-testid="appbar-user"]').wait_for(
+                state="visible", timeout=timeout_ms
+            )
+        except PlaywrightTimeoutError:
+            return False
+        return await self.is_logged_in()
 
     async def status(self, *, navigate: bool = True) -> SessionStatus:
         if navigate:
             await self.open_dashboard()
-        authenticated = await self.is_logged_in()
+        authenticated = await self.wait_for_logged_in()
         return SessionStatus(
             authenticated,
             self.page.url,

@@ -6,6 +6,7 @@ import html
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -228,7 +229,7 @@ async def sync_lessons(
     base_url: str = "https://edstem.org",
     region: str = "au",
     refresh: bool = False,
-    progress=lambda _message: None,
+    progress: Callable[[str], None] = lambda _message: None,
 ) -> tuple[Path, dict[str, int]]:
     catalog = await lesson_catalog(page, course, base_url=base_url, region=region)
     modules = list(catalog["modules"])
@@ -367,15 +368,15 @@ async def sync_lessons(
                                 base_url=base_url,
                                 region=region,
                             )
+                            saved_questions = [_question(question) for question in questions]
                         except SyncSafetyError:
-                            old_questions = previous_slides.get(str(raw.get("id")), {}).get(
+                            saved_questions = previous_slides.get(str(raw.get("id")), {}).get(
                                 "questions"
                             )
-                            if old_questions is None:
+                            if saved_questions is None:
                                 raise
-                            questions = old_questions
                         slide["passage"] = xml_to_markdown(raw.get("passage"))
-                        slide["questions"] = [_question(question) for question in questions]
+                        slide["questions"] = saved_questions
                     if raw.get("type") not in {"document", "code", "pdf", "webpage", "quiz"}:
                         slide["unsupported"] = True
                     slides.append(cast(dict[str, Any], sanitise_data(slide)))

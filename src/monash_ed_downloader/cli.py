@@ -10,6 +10,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from monash_ed_downloader.auth import (
+    clear_login_confirmation,
+    has_confirmed_login,
+    interactive_login,
+)
 from monash_ed_downloader.cache import ResourceCache
 from monash_ed_downloader.courses import CourseCatalog
 from monash_ed_downloader.errors import EdDownloaderError, LoginRequiredError
@@ -41,16 +46,18 @@ def run[T](operation: Coroutine[Any, Any, T]) -> T:
 async def _login(timeout: int) -> None:
     settings = Settings.default()
     console.print("正在打开 Chrome。请只在浏览器中完成 Ed 登录和学校 MFA。")
-    async with BrowserSession(settings, headless=False) as session:
-        await session.open_dashboard()
-        status = await session.wait_for_login(timeout_seconds=timeout)
-    console.print(f"[green]{status.message}[/green]")
+    await interactive_login(settings, timeout_seconds=timeout, notify=console.print)
 
 
 async def _with_auto_login[T](operation: Callable[[], Awaitable[T]]) -> T:
+    settings = Settings.default()
+    if not has_confirmed_login(settings):
+        console.print("首次配置或上次登录尚未成功，直接进入登录流程。")
+        await _login(600)
     try:
         return await operation()
     except LoginRequiredError:
+        clear_login_confirmation(settings)
         console.print("没有检测到有效 Ed 登录，进入浏览器登录流程。")
     await _login(600)
     return await operation()
@@ -387,6 +394,7 @@ async def _menu() -> None:
                     except Exception as error:  # noqa: BLE001 - menu remains usable
                         console.print(f"[red]{course.code} 同步失败：[/red]{error}")
                 continue
+            assert isinstance(choice, Course)
             action = _prompt_action(choice)
             if action is None:
                 continue

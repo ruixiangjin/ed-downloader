@@ -154,14 +154,16 @@ class ResourceDownloader:
             )
         if status in {404, 410}:
             self.counts.missing_remote += 1
-            return self._remembered(cached, preferred_name, ResourceStatus.MISSING_REMOTE)
+            return self._remembered(cached, safe_url, preferred_name, ResourceStatus.MISSING_REMOTE)
         try:
             response = await self._fetch("GET", url)
             headers = response.headers
             content_type = headers.get("content-type", "").split(";", 1)[0].casefold()
             if response.status in {404, 410}:
                 self.counts.missing_remote += 1
-                return self._remembered(cached, preferred_name, ResourceStatus.MISSING_REMOTE)
+                return self._remembered(
+                    cached, safe_url, preferred_name, ResourceStatus.MISSING_REMOTE
+                )
             if not response.ok:
                 raise RuntimeError(f"HTTP {response.status}")
             if is_media(url, content_type):
@@ -186,7 +188,7 @@ class ResourceDownloader:
         except Exception as error:  # noqa: BLE001 - preserve prior complete file
             if cached and local and local.is_file():
                 self.counts.unchanged += 1
-                return self._remembered(cached, preferred_name, ResourceStatus.UNCHANGED)
+                return self._remembered(cached, safe_url, preferred_name, ResourceStatus.UNCHANGED)
             self.counts.failed += 1
             return Resource(safe_url, preferred_name, ResourceStatus.FAILED, reason=str(error))
         remote_name = content_disposition_filename(headers.get("content-disposition", ""))
@@ -233,10 +235,14 @@ class ResourceDownloader:
         return result
 
     def _remembered(
-        self, cached: CachedResource | None, name: str, status: ResourceStatus
+        self,
+        cached: CachedResource | None,
+        source_url: str,
+        name: str,
+        status: ResourceStatus,
     ) -> Resource:
         return Resource(
-            cached.source_url if cached else "",
+            cached.source_url if cached else source_url,
             name,
             status,
             local_path=cached.local_path if cached else None,
