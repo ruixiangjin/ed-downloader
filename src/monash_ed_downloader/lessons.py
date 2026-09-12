@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from markdownify import markdownify
 from playwright.async_api import BrowserContext, Page, Response
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from monash_ed_downloader.cache import ResourceCache
 from monash_ed_downloader.download import ResourceDownloader, is_direct_file_candidate, is_media
@@ -71,8 +72,10 @@ async def lesson_catalog(
 ) -> dict[str, Any]:
     lessons_url = f"{base_url}/{region}/courses/{course.id}/lessons"
     body = await _capture_json(page, f"{base_url}/api/courses/{course.id}/lessons", lessons_url)
-    if not await page.locator('[data-testid="appbar-user"]').is_visible():
-        raise LoginRequiredError("Ed login is required.")
+    try:
+        await page.locator('[data-testid="appbar-user"]').wait_for(state="visible", timeout=5_000)
+    except PlaywrightTimeoutError:
+        raise LoginRequiredError("Ed login is required.") from None
     return {
         "lessons": body.get("lessons", []),
         "modules": body.get("modules", []),

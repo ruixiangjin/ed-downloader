@@ -257,8 +257,10 @@ async def _click_if_visible(locator: Locator) -> bool:
 
 async def _course_info(page: Page, course: Course) -> dict[str, Any]:
     await page.goto(course.url, wait_until="domcontentloaded")
-    if not await page.locator('[data-testid="appbar-user"]').is_visible():
-        raise LoginRequiredError("Ed login is required.")
+    try:
+        await page.locator('[data-testid="appbar-user"]').wait_for(state="visible", timeout=5_000)
+    except PlaywrightTimeoutError:
+        raise LoginRequiredError("Ed login is required.") from None
     thread_list = page.locator('section[aria-label="Thread list"]')
     await thread_list.wait_for(state="visible", timeout=20_000)
     categories = await page.locator(
