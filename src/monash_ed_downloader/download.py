@@ -4,6 +4,7 @@ import hashlib
 import mimetypes
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -38,6 +39,116 @@ MEDIA_EXTENSIONS = {
     ".woff",
     ".woff2",
 }
+WEBPAGE_EXTENSIONS = {
+    ".asp",
+    ".aspx",
+    ".cfm",
+    ".cgi",
+    ".do",
+    ".htm",
+    ".html",
+    ".jsp",
+    ".php",
+    ".shtml",
+    ".xhtml",
+}
+DOWNLOADABLE_EXTENSIONS = {
+    # Documents, data, and notebooks.
+    ".adoc",
+    ".csv",
+    ".doc",
+    ".docm",
+    ".docx",
+    ".epub",
+    ".ipynb",
+    ".json",
+    ".log",
+    ".md",
+    ".odp",
+    ".ods",
+    ".odt",
+    ".pdf",
+    ".ppt",
+    ".pptm",
+    ".pptx",
+    ".ps",
+    ".rtf",
+    ".tex",
+    ".tsv",
+    ".txt",
+    ".xls",
+    ".xlsb",
+    ".xlsm",
+    ".xlsx",
+    ".xml",
+    ".yaml",
+    ".yml",
+    # Source code and scripts.
+    ".asm",
+    ".bash",
+    ".c",
+    ".cc",
+    ".clj",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".dart",
+    ".go",
+    ".h",
+    ".hpp",
+    ".hs",
+    ".java",
+    ".jl",
+    ".js",
+    ".jsx",
+    ".kt",
+    ".kts",
+    ".lua",
+    ".m",
+    ".mjs",
+    ".mm",
+    ".pl",
+    ".ps1",
+    ".py",
+    ".r",
+    ".rb",
+    ".rs",
+    ".sass",
+    ".scala",
+    ".scss",
+    ".sh",
+    ".sql",
+    ".swift",
+    ".ts",
+    ".tsx",
+    ".vue",
+    ".zsh",
+    # Archives, packages, and compiled course artefacts.
+    ".7z",
+    ".apk",
+    ".bin",
+    ".bz",
+    ".bz2",
+    ".class",
+    ".deb",
+    ".dmg",
+    ".ear",
+    ".exe",
+    ".gz",
+    ".img",
+    ".iso",
+    ".jar",
+    ".msi",
+    ".pkg",
+    ".rar",
+    ".rpm",
+    ".tar",
+    ".tgz",
+    ".war",
+    ".whl",
+    ".xz",
+    ".zip",
+}
 DOWNLOADABLE_PREFIXES = ("application/", "text/")
 HTML_TYPES = {"text/html", "application/xhtml+xml"}
 
@@ -69,9 +180,22 @@ def is_media(url: str, content_type: str = "") -> bool:
 
 
 def is_direct_file_candidate(url: str) -> bool:
-    suffix = Path(urlparse(url).path).suffix.casefold()
-    return bool(suffix and suffix not in MEDIA_EXTENSIONS) or bool(
-        re.search(r"/(?:files?|attachments?|download)/", urlparse(url).path, re.I)
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").casefold()
+    path = parsed.path
+    suffix = Path(path).suffix.casefold()
+    trusted_ed_host = host == "edusercontent.com" or host.endswith(".edusercontent.com")
+    trusted_moodle_host = host == "learning.monash.edu" or host.endswith(".learning.monash.edu")
+    trusted_ed_file = trusted_ed_host and bool(re.search(r"/files?(?:/|$)", path, re.I))
+    trusted_moodle_file = trusted_moodle_host and bool(
+        re.search(r"/(?:mod/resource|pluginfile\.php)(?:/|$)", path, re.I)
+    )
+    if trusted_ed_file or trusted_moodle_file:
+        return True
+    if suffix in WEBPAGE_EXTENSIONS or suffix in MEDIA_EXTENSIONS:
+        return False
+    return suffix in DOWNLOADABLE_EXTENSIONS or bool(
+        re.search(r"/(?:attachments?|downloads?)(?:/|$)", path, re.I)
     )
 
 
@@ -84,12 +208,14 @@ class ResourceDownloader:
         course_id: str,
         course_root: Path,
         refresh: bool = False,
+        progress: Callable[[str], None] = lambda _message: None,
     ) -> None:
         self.request = request
         self.cache = cache
         self.course_id = course_id
         self.course_root = course_root
         self.refresh = refresh
+        self.progress = progress
         self.counts = DownloadCounts()
 
     async def _fetch(self, method: str, url: str) -> APIResponse:
@@ -108,6 +234,7 @@ class ResourceDownloader:
             return Resource(
                 safe_url, preferred_name, ResourceStatus.SKIPPED_MEDIA, reason="media-link-only"
             )
+        self.progress(f"Checking resource: {preferred_name}")
         cached = self.cache.get(self.course_id, safe_url)
         try:
             head = await self._fetch("HEAD", url)
@@ -122,6 +249,25 @@ class ResourceDownloader:
         modified = headers.get("last-modified")
         length_text = headers.get("content-length", "")
         length = int(length_text) if length_text.isdigit() else None
+        head_content_type = headers.get("content-type", "").split(";", 1)[0].casefold()
+        if 200 <= status < 400 and is_media(url, head_content_type):
+            self.counts.skipped_media += 1
+            return Resource(
+                safe_url,
+                preferred_name,
+                ResourceStatus.SKIPPED_MEDIA,
+                mime_type=head_content_type,
+                reason="media-link-only",
+            )
+        if 200 <= status < 400 and head_content_type in HTML_TYPES:
+            self.counts.link_only += 1
+            return Resource(
+                safe_url,
+                preferred_name,
+                ResourceStatus.LINK_ONLY,
+                mime_type=head_content_type,
+                reason="web-page-link-only",
+            )
         if (
             not self.refresh
             and cached

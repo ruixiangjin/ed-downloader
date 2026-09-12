@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from markdownify import markdownify
 from playwright.async_api import BrowserContext, Page, Response
+from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from monash_ed_downloader.cache import ResourceCache
@@ -56,6 +57,17 @@ def extract_urls(value: object) -> list[str]:
     return list(dict.fromkeys(html.unescape(url).rstrip("),.;") for url in urls))
 
 
+def extract_media_urls(value: object) -> list[str]:
+    text = str(value or "")
+    urls = re.findall(
+        r"<(?:audio|iframe|image|img|source|video)\b[^>]*"
+        r"\b(?:href|src)\s*=\s*[\"']([^\"']+)[\"']",
+        text,
+        re.I,
+    )
+    return list(dict.fromkeys(html.unescape(url) for url in urls))
+
+
 async def _capture_json(page: Page, api_match: str, navigation_url: str) -> dict[str, Any]:
     async with page.expect_response(
         lambda response: response.url == api_match, timeout=25_000
@@ -95,13 +107,16 @@ async def quiz_questions(
     page: Page, course: Course, lesson_id: object, slide_id: object, *, base_url: str, region: str
 ) -> list[dict[str, Any]]:
     fragment = f"/api/lessons/slides/{slide_id}/questions?pool="
-    async with page.expect_response(
-        lambda response: fragment in response.url, timeout=20_000
-    ) as info:
-        await page.goto(
-            f"{base_url}/{region}/courses/{course.id}/lessons/{lesson_id}/slides/{slide_id}",
-            wait_until="domcontentloaded",
-        )
+    try:
+        async with page.expect_response(
+            lambda response: fragment in response.url, timeout=20_000
+        ) as info:
+            await page.goto(
+                f"{base_url}/{region}/courses/{course.id}/lessons/{lesson_id}/slides/{slide_id}",
+                wait_until="domcontentloaded",
+            )
+    except PlaywrightError as error:
+        raise SyncSafetyError(f"Quiz questions could not be read for slide {slide_id}.") from error
     response = await info.value
     if not response.ok:
         raise SyncSafetyError(f"Quiz questions returned HTTP {response.status}.")
@@ -109,7 +124,10 @@ async def quiz_questions(
 
 
 async def extract_webpage(page: Page, url: str) -> dict[str, Any]:
-    response = await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+    try:
+        response = await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+    except PlaywrightError as error:
+        raise SyncSafetyError(f"Course webpage could not be read: {url}") from error
     if response is None or not response.ok:
         raise SyncSafetyError(f"Course webpage could not be read: {url}")
     content_type = response.headers.get("content-type", "").casefold()
@@ -118,13 +136,16 @@ async def extract_webpage(page: Page, url: str) -> dict[str, Any]:
     final_host = urlparse(page.url).hostname or ""
     if "login" in page.url.casefold() or "okta" in final_host.casefold():
         raise SyncSafetyError(f"Course webpage redirected to a login page: {url}")
-    await page.wait_for_timeout(250)
-    data = cast(
-        dict[str, Any],
-        await page.evaluate(
-            """() => {const root=document.querySelector('main,article,[role=\"main\"]')||document.body;const absolute=v=>{try{return new URL(v,document.baseURI).href}catch{return ''}};return{title:document.title,html:root.innerHTML,links:[...new Set([...root.querySelectorAll('a[href]')].map(a=>absolute(a.getAttribute('href'))).filter(Boolean))],media:[...new Set([...root.querySelectorAll('img[src],video[src],video source[src],audio[src],audio source[src],iframe[src]')].map(e=>absolute(e.getAttribute('src'))).filter(Boolean))]}}"""
-        ),
-    )
+    try:
+        await page.wait_for_timeout(250)
+        data = cast(
+            dict[str, Any],
+            await page.evaluate(
+                """() => {const root=document.querySelector('main,article,[role=\"main\"]')||document.body;const absolute=v=>{try{return new URL(v,document.baseURI).href}catch{return ''}};return{title:document.title,html:root.innerHTML,links:[...new Set([...root.querySelectorAll('a[href]')].map(a=>absolute(a.getAttribute('href'))).filter(Boolean))],media:[...new Set([...root.querySelectorAll('img[src],video[src],video source[src],audio[src],audio source[src],iframe[src]')].map(e=>absolute(e.getAttribute('src'))).filter(Boolean))]}}"""
+            ),
+        )
+    except PlaywrightError as error:
+        raise SyncSafetyError(f"Course webpage could not be extracted: {url}") from error
     markdown = markdownify(str(data.get("html", "")), heading_style="ATX")
     return {
         "source_url": url,
@@ -273,6 +294,7 @@ async def sync_lessons(
         course_id=course.id,
         course_root=course_root,
         refresh=refresh,
+        progress=progress,
     )
     groups: list[dict[str, Any]] = []
     try:
@@ -317,11 +339,16 @@ async def sync_lessons(
                     preferred = f"{slide_index:02d}-{slide['title'] or 'resource'}"
                     if raw.get("content"):
                         slide["text"] = xml_to_markdown(raw["content"])
+                        declared_media = set(extract_media_urls(raw["content"]))
                         slide["media"] = [
-                            url for url in extract_urls(raw["content"]) if is_media(url)
+                            url
+                            for url in extract_urls(raw["content"])
+                            if url in declared_media or is_media(url)
                         ]
                         resources: list[dict[str, Any]] = []
                         for url in extract_urls(raw["content"]):
+                            if url in declared_media:
+                                continue
                             if is_direct_file_candidate(url) and not is_media(url):
                                 resources.append(
                                     asdict(

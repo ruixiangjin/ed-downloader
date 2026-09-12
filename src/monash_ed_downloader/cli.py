@@ -216,7 +216,8 @@ async def _sync_course(
         )
     console.print(
         f"Lessons：下载 {counts['downloaded']}；未变化 {counts['unchanged']}；"
-        f"媒体跳过 {counts['skipped_media']}；仅链接 {counts['link_only']}。"
+        f"媒体跳过 {counts['skipped_media']}；仅链接 {counts['link_only']}；"
+        f"远端缺失 {counts['missing_remote']}；失败 {counts['failed']}。"
     )
     console.print(f"课程目录：{path}")
 
