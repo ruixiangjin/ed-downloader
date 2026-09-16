@@ -6,7 +6,6 @@ import html
 import json
 import os
 import re
-from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +21,7 @@ from monash_ed_downloader.cache import ResourceCache
 from monash_ed_downloader.download import ResourceDownloader, is_direct_file_candidate, is_media
 from monash_ed_downloader.errors import LoginRequiredError, SyncSafetyError
 from monash_ed_downloader.models import Course, ResourceStatus, sanitise_data
+from monash_ed_downloader.progress import ProgressCallback, ProgressUpdate, ignore_progress
 from monash_ed_downloader.utils import (
     normalise_text,
     safe_filename,
@@ -66,6 +66,35 @@ def extract_media_urls(value: object) -> list[str]:
         re.I,
     )
     return list(dict.fromkeys(html.unescape(url) for url in urls))
+
+
+def sortable_index(value: object) -> tuple[int, float]:
+    """Keep valid ED positions ordered and place missing positions last."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return (0, float(value))
+    if isinstance(value, str):
+        try:
+            return (0, float(value.strip()))
+        except ValueError:
+            pass
+    return (1, 0.0)
+
+
+def selected_lesson_count(
+    modules: list[dict[str, Any]],
+    lessons_by_module: dict[str, list[dict[str, Any]]],
+    requested: set[int],
+) -> int:
+    selected_module_ids = {
+        str(module.get("id"))
+        for group_index, module in enumerate(modules, 1)
+        if group_index in requested
+    }
+    return sum(
+        len(module_lessons)
+        for module_id, module_lessons in lessons_by_module.items()
+        if module_id in selected_module_ids
+    )
 
 
 async def _capture_json(page: Page, api_match: str, navigation_url: str) -> dict[str, Any]:
@@ -253,7 +282,7 @@ async def sync_lessons(
     base_url: str = "https://edstem.org",
     region: str = "au",
     refresh: bool = False,
-    progress: Callable[[str], None] = lambda _message: None,
+    progress: ProgressCallback = ignore_progress,
 ) -> tuple[Path, dict[str, int]]:
     catalog = await lesson_catalog(page, course, base_url=base_url, region=region)
     modules = list(catalog["modules"])
@@ -283,10 +312,24 @@ async def sync_lessons(
     by_module: dict[str, list[dict[str, Any]]] = {}
     order = {str(module.get("id")): index for index, module in enumerate(modules)}
     summaries.sort(
-        key=lambda item: (order.get(str(item.get("module_id")), 999), item.get("index", 999))
+        key=lambda item: (
+            order.get(str(item.get("module_id")), 999),
+            sortable_index(item.get("index")),
+        )
     )
     for summary in summaries:
         by_module.setdefault(str(summary.get("module_id")), []).append(summary)
+    lesson_total = selected_lesson_count(modules, by_module, requested)
+    lessons_completed = 0
+    progress(
+        ProgressUpdate(
+            "lessons",
+            "Processing lessons",
+            completed=0,
+            total=lesson_total,
+        )
+    )
+    progress(ProgressUpdate("resources", "Checking resources", completed=0))
     content_page = await context.new_page()
     downloader = ResourceDownloader(
         context.request,
@@ -318,7 +361,14 @@ async def sync_lessons(
             )
             lessons: list[dict[str, Any]] = []
             for lesson_index, summary in enumerate(by_module.get(module_id, []), 1):
-                progress(f"Reading {module.get('name')}: {summary.get('title')}")
+                progress(
+                    ProgressUpdate(
+                        "lessons",
+                        f"Processing lesson: {summary.get('title') or 'Untitled'}",
+                        completed=lessons_completed,
+                        total=lesson_total,
+                    )
+                )
                 detail = await lesson_detail(
                     page, course, summary.get("id"), base_url=base_url, region=region
                 )
@@ -327,7 +377,11 @@ async def sync_lessons(
                 )
                 slides: list[dict[str, Any]] = []
                 for slide_index, raw in enumerate(
-                    sorted(detail.get("slides", []), key=lambda item: item.get("index", 999)), 1
+                    sorted(
+                        detail.get("slides", []),
+                        key=lambda item: sortable_index(item.get("index")),
+                    ),
+                    1,
                 ):
                     slide = {
                         "id": raw.get("id"),
@@ -434,6 +488,15 @@ async def sync_lessons(
                     json.dumps(slides, sort_keys=True).encode()
                 ).hexdigest()
                 lessons.append(lesson)
+                lessons_completed += 1
+                progress(
+                    ProgressUpdate(
+                        "lessons",
+                        f"Processed lesson: {detail.get('title') or 'Untitled'}",
+                        completed=lessons_completed,
+                        total=lesson_total,
+                    )
+                )
             groups.append(
                 {
                     "id": module_id,
@@ -444,6 +507,23 @@ async def sync_lessons(
             )
     finally:
         await content_page.close()
+    progress(
+        ProgressUpdate(
+            "lessons",
+            "Processing lessons",
+            completed=lessons_completed,
+            total=lesson_total,
+            finished=True,
+        )
+    )
+    progress(
+        ProgressUpdate(
+            "resources",
+            "Checking resources",
+            completed=downloader.resource_count,
+            finished=True,
+        )
+    )
     existing_ids = {str(module.get("id")) for module in modules}
     for group_id, old_group in previous_groups.items():
         if group_id not in existing_ids:

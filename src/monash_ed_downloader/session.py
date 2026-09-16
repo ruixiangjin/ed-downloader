@@ -78,15 +78,20 @@ class BrowserSession:
         )
 
     async def close(self) -> None:
-        if self._context is not None:
-            await self._context.storage_state(path=self.settings.storage_state)
-            self.settings.storage_state.chmod(0o600)
-            await self._context.close()
-            self._context = None
-            self._page = None
-        if self._playwright is not None:
-            await self._playwright.stop()
-            self._playwright = None
+        context, playwright = self._context, self._playwright
+        self._context = None
+        self._page = None
+        self._playwright = None
+        try:
+            if context is not None:
+                try:
+                    await context.storage_state(path=self.settings.storage_state)
+                    self.settings.storage_state.chmod(0o600)
+                finally:
+                    await context.close()
+        finally:
+            if playwright is not None:
+                await playwright.stop()
 
     async def _route(self, route: Route) -> None:
         request = route.request

@@ -2,12 +2,13 @@
 
 # Monash ED Downloader
 
-A read-only macOS command-line tool that synchronises Ed Discussions, Lessons, and non-media
+A read-only cross-platform command-line tool that synchronises Ed Discussions, Lessons, and non-media
 attachments that your own account is authorised to access for offline study. It uses a dedicated
 Chrome profile for Monash SSO and MFA, and it does not read Ed Workspaces.
 
-Login data and the incremental database are kept in macOS Application Support. Course materials are
-saved to `~/Desktop/Monash ED Downloads` by default, outside the Git repository.
+Login data and the incremental database are kept in the operating system's private per-user data
+directory. Course materials are saved to the current user's Desktop under `Monash ED Downloads` by
+default, outside the Git repository.
 
 ## What it saves
 
@@ -22,24 +23,46 @@ saved to `~/Desktop/Monash ED Downloads` by default, outside the Git repository.
 
 Images, video, audio, and fonts are not downloaded. Ordinary external webpages are recorded as
 links; when Ed itself defines a Lesson slide as `webpage`, that page is treated as course content
-and saved as Markdown. This covers externally hosted lesson pages used by courses such as FIT2109.
+and saved as Markdown. This covers externally hosted lesson pages that Ed designates as course
+content.
 ZIP files are saved without extraction, and downloaded documents are not converted.
 
-## Requirements and installation
+## For regular users: double-click to start
 
-- macOS with Google Chrome
-- Python 3.12 or newer
-- [uv](https://docs.astral.sh/uv/)
+Regular users need Google Chrome and an internet connection for the first launch. They do not need
+to install Python, uv, or development tools manually.
+
+1. Download or clone this repository.
+2. On Windows, double-click `Monash ED Downloader.cmd`. On a Mac, double-click
+   `Monash ED Downloader.command`.
+3. On the first launch, wait while the launcher downloads the official uv runtime and prepares only
+   the Python version and application dependencies needed to run ED Downloader.
+4. Complete Monash SSO and MFA in the Chrome window when prompted, then use the numbered menu.
+
+The automatic runtime is isolated in the operating system's private per-user data directory. On
+Windows this is normally `%LOCALAPPDATA%\Monash ED Downloader\`; on a Mac it is normally
+`~/Library/Application Support/Monash ED Downloader/`. It does not change the system Python,
+`PATH`, or shell configuration. Later launches reuse this environment and are faster.
+
+If the operating system blocks the launcher on its first opening, use its standard **Open** or
+security-confirmation option. If environment preparation fails, check the internet connection and
+double-click the launcher again.
+
+## For developers: Terminal setup
+
+Developers manage their own environment from Terminal. Install
+[uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
 
 ```console
 git clone https://github.com/ruixiangjin/ed-downloader.git
 cd ed-downloader
 uv sync --all-groups
 uv run ed-downloader --help
+uv run ed-downloader sync --help
 ```
 
-Use `uv run ed-downloader ...` from the repository, or run `uv tool install .` once if you want the
-shorter `ed-downloader ...` command everywhere.
+Use `uv run ed-downloader ...` for development commands. The double-click launchers are intended
+for regular users and deliberately exclude the `dev` dependency group.
 
 ## First login
 
@@ -64,8 +87,9 @@ archived course can still be selected explicitly by course code or numeric Ed co
 
 ## Interactive terminal menu
 
-Run `uv run ed-downloader menu`, or double-click `Monash ED Downloader.command` in Finder. The
-launcher finds the repository from its own location, so it contains no user-specific path.
+Developers can run `uv run ed-downloader menu`. Regular users can double-click the launcher for
+their operating system. Both launchers find the repository from their own location, so the project
+folder can be stored anywhere and no user-specific path is embedded.
 
 The menu provides these choices:
 
@@ -87,22 +111,22 @@ Discussions from being saved.
 
 ```console
 # List a course's available Lesson groups without downloading files
-uv run ed-downloader scan --course FIT2109
+uv run ed-downloader scan --course DEMO1001
 
 # Incrementally synchronise one course, or only one content scope
-uv run ed-downloader sync --course FIT2109
-uv run ed-downloader sync --course FIT2109 --scope discussions
-uv run ed-downloader sync --course FIT2109 --scope lessons
+uv run ed-downloader sync --course DEMO1001
+uv run ed-downloader sync --course DEMO1001 --scope discussions
+uv run ed-downloader sync --course DEMO1001 --scope lessons
 
 # Synchronise selected Lesson groups by their displayed numbers
-uv run ed-downloader sync --course FIT2109 --scope lessons --groups "1,3-5"
+uv run ed-downloader sync --course DEMO1001 --scope lessons --groups "1,3-5"
 
 # Synchronise every current course, excluding archived courses
 uv run ed-downloader sync --all
 
 # Force a full Discussions pass or re-fetch Lesson attachment bodies
-uv run ed-downloader sync --course FIT2109 --full
-uv run ed-downloader sync --course FIT2109 --scope lessons --refresh
+uv run ed-downloader sync --course DEMO1001 --full
+uv run ed-downloader sync --course DEMO1001 --scope lessons --refresh
 ```
 
 A normal sync must specify exactly one `--course`; all courses are only selected by the explicit
@@ -110,7 +134,7 @@ A normal sync must specify exactly one `--course`; all courses are only selected
 Lessons and cannot be combined with `--all`. Use `--headed` if you need to watch the automated
 browser, and `--output /another/folder` to choose a different material directory.
 
-The default output is `~/Desktop/Monash ED Downloads` and has this shape:
+The default output is the current user's Desktop under `Monash ED Downloads` and has this shape:
 
 ```text
 Course name/
@@ -150,20 +174,27 @@ If an Ed-designated webpage or quiz cannot be refreshed but a previous successfu
 tool preserves that copy rather than discarding it. Each sync prints a summary of Discussion changes
 and Lesson resources that were downloaded, unchanged, skipped as media, or kept as links.
 
+During a sync, an interactive terminal shows persistent progress for course selection, Discussion
+discovery, thread reading, Lesson processing, and resource checks. Stages with a known item count use
+a progress bar; discovery and resource stages use an activity indicator because their final totals
+are not known in advance. Redirected or non-interactive output uses plain English progress lines.
+
 ## Privacy and repository safety
 
 The dedicated Ed browser profile, login confirmation, browser storage, and SQLite database live in
-`~/Library/Application Support/Monash ED Downloader/`. Downloaded materials live outside the
-repository, and `.gitignore` excludes common credentials, databases, partial files, and output
-directories. Exported URLs remove common token and temporary-signature query parameters, and HTML
-login pages are not saved as attachments.
+the operating system's private per-user data directory: normally
+`%LOCALAPPDATA%\Monash ED Downloader\` on Windows,
+`~/Library/Application Support/Monash ED Downloader/` on a Mac, and the standard user data
+directory on Linux. Downloaded materials live outside the repository, and `.gitignore` excludes
+common credentials, databases, partial files, and output directories. Exported URLs remove common
+token and temporary-signature query parameters, and HTML login pages are not saved as attachments.
 
 Before publishing changes, still review `git status` and do not commit course materials or login
 data. Only access material that your own Monash account is authorised to use.
 
 API Token login is planned as a separate stage after browser-based behaviour is stable. Any future
-Token will be stored in macOS Keychain rather than the repository, material directory, logs, or
-SQLite database.
+Token will use the operating system's credential store rather than the repository, material
+directory, logs, or SQLite database.
 
 ## Troubleshooting
 
@@ -182,8 +213,9 @@ SQLite database.
 
 ## Development checks
 
-GitHub Actions runs only anonymous, offline fixtures and simulated HTTP responses. It never signs in
-to Ed or downloads real course material.
+Run these commands manually from Terminal after `uv sync --all-groups`. They use only anonymous,
+offline fixtures and simulated HTTP responses; they do not sign in to Ed or download course
+material.
 
 ```console
 uv run ruff format --check .
@@ -191,3 +223,8 @@ uv run ruff check .
 uv run mypy src tests
 uv run pytest
 ```
+
+## License
+
+The source code is available under the [MIT License](LICENSE). Course material downloaded by the
+tool is not covered by this software license and must not be redistributed without permission.

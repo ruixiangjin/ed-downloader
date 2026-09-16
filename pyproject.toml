@@ -3,6 +3,7 @@ name = "monash-ed-downloader"
 version = "0.1.0"
 description = "Synchronise authorised Ed Discussions and Lessons for offline study."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.13.0",

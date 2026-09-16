@@ -9,8 +9,14 @@ from monash_ed_downloader.download import (
     is_direct_file_candidate,
     is_media,
 )
-from monash_ed_downloader.lessons import extract_media_urls, xml_to_markdown
+from monash_ed_downloader.lessons import (
+    extract_media_urls,
+    selected_lesson_count,
+    sortable_index,
+    xml_to_markdown,
+)
 from monash_ed_downloader.models import ResourceStatus
+from monash_ed_downloader.progress import ProgressUpdate
 from monash_ed_downloader.selection import parse_group_selection
 
 
@@ -100,11 +106,13 @@ async def test_head_response_avoids_unnecessary_get(
     tmp_path: Path, content_type: str, expected_status: ResourceStatus
 ) -> None:
     request = FakeRequest(content_type)
+    updates: list[ProgressUpdate] = []
     downloader = ResourceDownloader(
         cast(Any, request),
         cast(Any, EmptyCache()),
-        course_id="39026",
+        course_id="10001",
         course_root=tmp_path,
+        progress=updates.append,
     )
 
     result = await downloader.download(
@@ -115,6 +123,7 @@ async def test_head_response_avoids_unnecessary_get(
 
     assert result.status is expected_status
     assert request.methods == ["HEAD"]
+    assert updates == [ProgressUpdate("resources", "Checking resource: resource", 1)]
 
 
 def test_content_disposition_prefers_utf8_filename() -> None:
@@ -126,3 +135,34 @@ def test_content_disposition_prefers_utf8_filename() -> None:
 
 def test_group_selection_supports_ranges_and_chinese_punctuation() -> None:
     assert parse_group_selection("1，3～5", [1, 2, 3, 4, 5]) == [1, 3, 4, 5]
+
+
+def test_group_selection_supports_common_separators_and_dashes() -> None:
+    assert parse_group_selection("1、3–5；7", list(range(1, 8))) == [1, 3, 4, 5, 7]
+
+
+@pytest.mark.parametrize("value", ["hello", "1,,2", "3-1"])
+def test_group_selection_rejects_invalid_input(value: str) -> None:
+    with pytest.raises(ValueError):
+        parse_group_selection(value, [1, 2, 3])
+
+
+def test_group_selection_rejects_numbers_outside_available_range() -> None:
+    with pytest.raises(ValueError, match="outside the available range"):
+        parse_group_selection("1,4", [1, 2, 3])
+
+
+def test_missing_lesson_positions_sort_after_numbered_positions() -> None:
+    values = [None, 2, "1", "not-a-number"]
+    assert sorted(values, key=sortable_index) == ["1", 2, None, "not-a-number"]
+
+
+def test_lesson_progress_total_only_counts_selected_groups() -> None:
+    modules = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+    lessons: dict[str, list[dict[str, object]]] = {
+        "a": [{}, {}],
+        "b": [{}],
+        "c": [{}, {}, {}],
+    }
+
+    assert selected_lesson_count(modules, lessons, {1, 3}) == 5

@@ -2,12 +2,12 @@
 
 # Monash ED Downloader
 
-一个只读的 macOS 命令行工具，用于同步本人账户有权访问的 Ed Discussions、Lessons 和
+一个只读的跨平台命令行工具，用于同步本人账户有权访问的 Ed Discussions、Lessons 和
 非媒体附件，方便离线学习。它使用独立的 Chrome Profile 完成 Monash SSO 和 MFA，
 并且不会读取 Ed Workspace。
 
-登录资料和增量数据库保存在 macOS Application Support 中。课程资料默认保存到
-`~/Desktop/Monash ED Downloads`，位于 Git 仓库之外。
+登录资料和增量数据库保存在操作系统为当前用户提供的私有数据目录中。课程资料默认保存到
+当前用户桌面的 `Monash ED Downloads` 文件夹，位于 Git 仓库之外。
 
 ## 保存内容
 
@@ -21,24 +21,44 @@
 - 普通外部网页和所有媒体只保留链接。
 
 图片、视频、音频和字体不会下载。普通外部网页只记录链接；当 Ed 本身把某个 Lesson Slide
-定义为 `webpage` 时，该网页会被视为课程正文并保存为 Markdown。这一规则覆盖 FIT2109 等
-课程使用的外部托管课文。ZIP 文件只保存而不解压，下载的文档也不会转换格式。
+定义为 `webpage` 时，该网页会被视为课程正文并保存为 Markdown。这一规则适用于 Ed 指定为
+课程内容的外部托管课文。ZIP 文件只保存而不解压，下载的文档也不会转换格式。
 
-## 环境要求与安装
+## 普通使用者：双击启动
 
-- 装有 Google Chrome 的 macOS
-- Python 3.12 或更新版本
-- [uv](https://docs.astral.sh/uv/)
+普通使用者只需要安装 Google Chrome，并在首次运行时连接网络。不需要自己安装 Python、
+uv 或开发工具。
+
+1. 下载或克隆这个仓库。
+2. Windows 用户双击 `Monash ED Downloader.cmd`；Mac 用户双击
+   `Monash ED Downloader.command`。
+3. 首次运行时，等待启动器下载官方 uv 运行工具，并只准备 ED Downloader
+   运行所需的 Python 版本和用户依赖。
+4. 按提示在 Chrome 中完成 Monash SSO 和 MFA，然后使用数字菜单。
+
+自动运行环境隔离保存在操作系统为当前用户提供的私有数据目录中。Windows 通常位于
+`%LOCALAPPDATA%\Monash ED Downloader\`；Mac 通常位于
+`~/Library/Application Support/Monash ED Downloader/`。它不会修改系统 Python、
+`PATH` 或 shell 配置，以后启动会复用这个环境，速度会更快。
+
+如果操作系统首次阻止打开启动器，请使用系统提供的“打开”或安全确认选项。
+如果环境准备失败，请检查网络后重新双击启动器。
+
+## 开发者：Terminal 环境
+
+开发者在 Terminal 中自己管理完整环境。先安装
+[uv](https://docs.astral.sh/uv/getting-started/installation/)，再运行：
 
 ```console
 git clone https://github.com/ruixiangjin/ed-downloader.git
 cd ed-downloader
 uv sync --all-groups
 uv run ed-downloader --help
+uv run ed-downloader sync --help
 ```
 
-可以在仓库目录中使用 `uv run ed-downloader ...`；如果希望在任何位置使用较短的
-`ed-downloader ...` 命令，可以执行一次 `uv tool install .`。
+开发时使用 `uv run ed-downloader ...`。双击启动器专为普通使用者准备，
+会明确排除 `dev` 开发依赖。
 
 ## 首次登录
 
@@ -61,8 +81,9 @@ uv run ed-downloader menu
 
 ## 交互式终端菜单
 
-运行 `uv run ed-downloader menu`，或者在 Finder 中双击 `Monash ED Downloader.command`。
-启动器会根据自身位置找到仓库，因此其中不包含用户专属路径。
+开发者可以运行 `uv run ed-downloader menu`。普通使用者可以双击自己操作系统对应的
+启动器。两个启动器都会根据自身位置找到仓库，因此项目文件夹可以放在任意位置，
+启动器中也不包含用户专属路径。
 
 菜单提供以下选项：
 
@@ -82,22 +103,22 @@ uv run ed-downloader menu
 
 ```console
 # 列出课程中可用的 Lesson 分组，但不下载文件
-uv run ed-downloader scan --course FIT2109
+uv run ed-downloader scan --course DEMO1001
 
 # 增量同步一门课程，或只同步一种内容
-uv run ed-downloader sync --course FIT2109
-uv run ed-downloader sync --course FIT2109 --scope discussions
-uv run ed-downloader sync --course FIT2109 --scope lessons
+uv run ed-downloader sync --course DEMO1001
+uv run ed-downloader sync --course DEMO1001 --scope discussions
+uv run ed-downloader sync --course DEMO1001 --scope lessons
 
 # 按显示的序号同步指定 Lesson 分组
-uv run ed-downloader sync --course FIT2109 --scope lessons --groups "1,3-5"
+uv run ed-downloader sync --course DEMO1001 --scope lessons --groups "1,3-5"
 
 # 同步所有当前课程，不包括归档课程
 uv run ed-downloader sync --all
 
 # 强制完整检查 Discussions，或重新获取 Lesson 附件内容
-uv run ed-downloader sync --course FIT2109 --full
-uv run ed-downloader sync --course FIT2109 --scope lessons --refresh
+uv run ed-downloader sync --course DEMO1001 --full
+uv run ed-downloader sync --course DEMO1001 --scope lessons --refresh
 ```
 
 普通同步必须且只能指定一个 `--course`；只有明确使用 `--all` 才会选择所有课程。
@@ -105,7 +126,7 @@ uv run ed-downloader sync --course FIT2109 --scope lessons --refresh
 同时使用。如果需要看到自动操作的浏览器，请使用 `--headed`；使用
 `--output /其他/文件夹` 可以选择不同的资料目录。
 
-默认输出目录是 `~/Desktop/Monash ED Downloads`，结构如下：
+默认输出目录是当前用户桌面的 `Monash ED Downloads` 文件夹，结构如下：
 
 ```text
 课程名称/
@@ -143,18 +164,23 @@ Lessons 索引会链接到每个生成的 Lesson Markdown 文件。这些文件�
 每次同步都会汇总 Discussions 的变化，以及已下载、未变化、作为媒体跳过或只保留链接的 Lesson
 资源。
 
+同步过程中，交互式终端会持续显示课程、论坛发现、帖子读取、Lesson 处理和资源检查进度。
+已知项目总数的阶段使用进度条；无法预先知道总数的发现和资源阶段使用活动指示器。
+重定向或非交互式输出会改用普通英文进度日志。
+
 ## 隐私与仓库安全
 
-Ed 专用浏览器 Profile、登录确认、浏览器存储和 SQLite 数据库位于
-`~/Library/Application Support/Monash ED Downloader/`。下载的资料位于仓库之外；
-`.gitignore` 会排除常见凭据、数据库、未完成文件和输出目录。导出的 URL 会移除常见 Token
-和临时签名查询参数，HTML 登录页面也不会被保存为附件。
+Ed 专用浏览器 Profile、登录确认、浏览器存储和 SQLite 数据库位于操作系统为当前用户提供的
+私有数据目录：Windows 通常是 `%LOCALAPPDATA%\Monash ED Downloader\`，Mac 通常是
+`~/Library/Application Support/Monash ED Downloader/`，Linux 则使用标准用户数据目录。
+下载的资料位于仓库之外；`.gitignore` 会排除常见凭据、数据库、未完成文件和输出目录。
+导出的 URL 会移除常见 Token 和临时签名查询参数，HTML 登录页面也不会被保存为附件。
 
 发布更改前仍应检查 `git status`，不要提交课程资料或登录数据。只访问你自己的 Monash
 账户有权使用的资料。
 
-API Token 登录计划在浏览器版本的行为稳定后作为独立阶段加入。未来的 Token 会保存在 macOS
-Keychain 中，而不会写入仓库、资料目录、日志或 SQLite 数据库。
+API Token 登录计划在浏览器版本的行为稳定后作为独立阶段加入。未来的 Token 会使用操作系统的
+凭据存储，而不会写入仓库、资料目录、日志或 SQLite 数据库。
 
 ## 故障排查
 
@@ -172,8 +198,8 @@ Keychain 中，而不会写入仓库、资料目录、日志或 SQLite 数据库
 
 ## 开发检查
 
-GitHub Actions 只运行匿名离线 fixture 和模拟 HTTP 响应。它绝不会登录 Ed，也不会下载真实
-课程资料。
+执行 `uv sync --all-groups` 后，开发者可以在 Terminal 中手动运行以下命令。
+它们只使用匿名离线 fixture 和模拟 HTTP 响应，不会登录 Ed 或下载课程资料。
 
 ```console
 uv run ruff format --check .
@@ -181,3 +207,8 @@ uv run ruff check .
 uv run mypy src tests
 uv run pytest
 ```
+
+## 许可证
+
+源代码使用 [MIT License](LICENSE)。通过本工具下载的课程资料不属于该软件许可证的覆盖范围，
+未经允许不得再分发。

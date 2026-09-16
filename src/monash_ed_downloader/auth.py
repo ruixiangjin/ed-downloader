@@ -49,25 +49,25 @@ async def interactive_login(
         await session.open_dashboard()
         if await session.wait_for_logged_in(timeout_ms=3_000):
             mark_login_confirmed(settings)
-            notify("当前 Ed 登录状态有效。")
+            notify("The current Ed session is valid.")
             return
 
         clear_login_confirmation(settings)
-        notify("\n请在打开的 Chrome 窗口中完成登录。")
+        notify("\nComplete the login in the Chrome window that just opened.")
         deadline = monotonic() + timeout_seconds
         while monotonic() < deadline:
             await asyncio.to_thread(
                 prompt,
-                "确认已经看到 Ed 课程页面后，回到这里按 Enter：",
+                "When an Ed course page is visible, return here and press Enter: ",
             )
             if session.page.is_closed():
-                raise LoginRequiredError("登录窗口已关闭，请重新运行登录。")
+                raise LoginRequiredError("The login window was closed. Run login again.")
             if await session.wait_for_logged_in(timeout_ms=3_000):
                 mark_login_confirmed(settings)
-                notify("登录状态已保存到本机。")
+                notify("The login session has been saved on this device.")
                 return
             notify(
-                "\n仍未检测到成功登录。请继续在 Chrome 中完成登录，然后再次按 Enter；"
-                "不需要关闭或重新启动程序。"
+                "\nA successful login was not detected yet. Complete the login in Chrome, "
+                "then press Enter again; you do not need to restart the program."
             )
-        raise LoginRequiredError("登录等待已超时，请重新运行登录。")
+        raise LoginRequiredError("Login timed out. Run login again.")

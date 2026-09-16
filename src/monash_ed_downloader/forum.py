@@ -16,6 +16,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from monash_ed_downloader.errors import LoginRequiredError, SyncSafetyError
 from monash_ed_downloader.models import Course, sanitise_data
+from monash_ed_downloader.progress import ProgressCallback, ProgressUpdate, ignore_progress
 from monash_ed_downloader.utils import safe_filename, write_json_atomic
 
 STORE_SCHEMA_VERSION = 2
@@ -383,26 +384,65 @@ async def sync_discussions(
     *,
     force_full: bool = False,
     delay_ms: int = 100,
-    progress: Callable[[str], None] = lambda _message: None,
+    progress: ProgressCallback = ignore_progress,
 ) -> tuple[Path, dict[str, int]]:
     store, path = load_store(course, output_root)
     next_tag = int(store["current_tag"]) + 1
     full = int(store["current_tag"]) == 0 or force_full or next_tag % 10 == 0
     course_info = await _course_info(page, course)
+    progress(ProgressUpdate("discussion-discovery", "Discovering discussions"))
     if full:
         urls = await _discover_full(
-            page, course.id, lambda count: progress(f"Checking discussion list: {count}")
+            page,
+            course.id,
+            lambda count: progress(
+                ProgressUpdate(
+                    "discussion-discovery",
+                    "Discovering discussions",
+                    completed=count,
+                )
+            ),
         )
         discovery: dict[str, Any] | None = None
     else:
         urls, discovery = await _discover_incremental(
             page,
             build_known_reply_counts(store),
-            lambda count: progress(f"Checking discussion list: {count}"),
+            lambda count: progress(
+                ProgressUpdate(
+                    "discussion-discovery",
+                    "Discovering discussions",
+                    completed=count,
+                )
+            ),
         )
+    checked = discovery["checkedCount"] if discovery else len(urls)
+    progress(
+        ProgressUpdate(
+            "discussion-discovery",
+            "Discovering discussions",
+            completed=checked,
+            finished=True,
+        )
+    )
     threads: list[dict[str, Any]] = []
+    progress(
+        ProgressUpdate(
+            "discussion-reading",
+            "Reading discussions",
+            completed=0,
+            total=len(urls),
+        )
+    )
     for index, url in enumerate(urls, 1):
-        progress(f"Reading thread {index}/{len(urls)}")
+        progress(
+            ProgressUpdate(
+                "discussion-reading",
+                f"Reading discussion {index} of {len(urls)}",
+                completed=index - 1,
+                total=len(urls),
+            )
+        )
         last_error: Exception | None = None
         for attempt in range(3):
             try:
@@ -417,8 +457,25 @@ async def sync_discussions(
             raise SyncSafetyError(
                 f"Thread {url.rsplit('/', 1)[-1]} failed after three attempts."
             ) from last_error
+        progress(
+            ProgressUpdate(
+                "discussion-reading",
+                f"Reading discussion {index} of {len(urls)}",
+                completed=index,
+                total=len(urls),
+            )
+        )
         if delay_ms and index < len(urls):
             await asyncio.sleep(delay_ms / 1000)
+    progress(
+        ProgressUpdate(
+            "discussion-reading",
+            "Reading discussions",
+            completed=len(urls),
+            total=len(urls),
+            finished=True,
+        )
+    )
     if discovery and not discovery["boundaryReached"] and not discovery["reachedEnd"]:
         raise SyncSafetyError("No reliable incremental boundary was found.")
     previous_total = max([0, *(int(run.get("total_threads", 0)) for run in store["runs"])])

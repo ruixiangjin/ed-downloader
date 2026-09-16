@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from platformdirs import user_data_path
+from platformdirs import user_data_path, user_desktop_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,10 +15,10 @@ class Settings:
 
     @classmethod
     def default(cls, *, home: Path | None = None) -> Settings:
-        resolved_home = home if home is not None else Path.home()
+        desktop = home / "Desktop" if home is not None else user_desktop_path()
         return cls(
-            output_root=resolved_home / "Desktop" / "Monash ED Downloads",
-            state_root=Path(user_data_path("Monash ED Downloader", "ruixiangjin")),
+            output_root=desktop / "Monash ED Downloads",
+            state_root=Path(user_data_path("Monash ED Downloader", appauthor=False)),
         )
 
     @property

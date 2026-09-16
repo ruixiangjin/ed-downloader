@@ -41,7 +41,7 @@ def parse_dashboard_html(html: str, *, base_url: str, region: str) -> list[Cours
     soup = BeautifulSoup(html, "html.parser")
     root = soup.select_one(".dash-container")
     if root is None:
-        raise ValueError("ED Dashboard course container was not found.")
+        raise ValueError("The Ed Dashboard course container was not found.")
 
     archived = False
     archive_group: str | None = None
@@ -69,7 +69,7 @@ def parse_dashboard_html(html: str, *, base_url: str, region: str) -> list[Cours
                 )
             )
     if not courses:
-        raise ValueError("No ED courses were found on the Dashboard.")
+        raise ValueError("No accessible Ed courses were found on the Dashboard.")
     if len([node for node in root.select(":scope > .dash-courses")]) > 1 and not found_boundary:
         for course in courses:
             course.status = CourseStatus.UNCLASSIFIED
@@ -111,4 +111,4 @@ class CourseCatalog:
             raise CourseNotFoundError(
                 f"More than one course matches {selector}. Use the numeric Ed course ID."
             )
-        raise CourseNotFoundError(f"No accessible ED course matches {selector}.")
+        raise CourseNotFoundError(f"No accessible Ed course matches {selector}.")

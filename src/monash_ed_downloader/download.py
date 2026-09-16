@@ -4,7 +4,6 @@ import hashlib
 import mimetypes
 import os
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -13,6 +12,7 @@ from playwright.async_api import APIRequestContext, APIResponse
 
 from monash_ed_downloader.cache import CachedResource, ResourceCache
 from monash_ed_downloader.models import Resource, ResourceStatus, sanitise_url
+from monash_ed_downloader.progress import ProgressCallback, ProgressUpdate, ignore_progress
 from monash_ed_downloader.utils import safe_filename
 
 MEDIA_PREFIXES = ("image/", "video/", "audio/", "font/")
@@ -208,7 +208,7 @@ class ResourceDownloader:
         course_id: str,
         course_root: Path,
         refresh: bool = False,
-        progress: Callable[[str], None] = lambda _message: None,
+        progress: ProgressCallback = ignore_progress,
     ) -> None:
         self.request = request
         self.cache = cache
@@ -217,6 +217,7 @@ class ResourceDownloader:
         self.refresh = refresh
         self.progress = progress
         self.counts = DownloadCounts()
+        self.resource_count = 0
 
     async def _fetch(self, method: str, url: str) -> APIResponse:
         return await self.request.fetch(
@@ -228,13 +229,20 @@ class ResourceDownloader:
         )
 
     async def download(self, url: str, target_directory: Path, preferred_name: str) -> Resource:
+        self.resource_count += 1
+        self.progress(
+            ProgressUpdate(
+                "resources",
+                f"Checking resource: {preferred_name}",
+                completed=self.resource_count,
+            )
+        )
         safe_url = sanitise_url(url)
         if is_media(url):
             self.counts.skipped_media += 1
             return Resource(
                 safe_url, preferred_name, ResourceStatus.SKIPPED_MEDIA, reason="media-link-only"
             )
-        self.progress(f"Checking resource: {preferred_name}")
         cached = self.cache.get(self.course_id, safe_url)
         try:
             head = await self._fetch("HEAD", url)
